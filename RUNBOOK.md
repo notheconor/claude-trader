@@ -35,11 +35,13 @@ If the market is closed (holiday), write `python3 tt.py note "market closed"`, c
 3. `note "..."` summary.
 4. **Fridays:** run `score`, then write a weekly review note: P&L vs QQQ, best/worst trade and why,
    what to change. Then send Conor a push notification with the score line and 2-sentence takeaway.
+   (Theses from earlier runs live in those runs' transcripts; reconstruct the week's trades from
+   Alpaca's order history, which `score` and `status` read.)
 
 ### Always finish with
-```
-git add journal.jsonl state.json && git commit -qm "run $(date -u +%FT%H%M)" && git push -q
-```
+A final message with: market read, every order placed or closed (symbol, side, qty, entry, stop,
+target, full thesis), positions still open, and the `status` equity line. **This run's transcript is
+the trade journal** — the repo is read-only for scheduled runs, so do not try to commit or push.
 
 ## Trading rules
 - **Individual common stocks only.** No ETFs (including leveraged ones like SOXL/NVDL/TQQQ), no warrants, no OTC, no options.

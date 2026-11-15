@@ -67,7 +67,7 @@ def state():
         return json.load(open(STATE))
     a = T.get_account()
     s = {"baseline_account_equity": float(a.equity), "start_date": str(dt.date.today()),
-         "killed": False, "intraday": []}
+         "killed": False}
     json.dump(s, open(STATE, "w"), indent=1)
     return s
 
@@ -80,6 +80,13 @@ def equity(s, a=None):
     a = a or T.get_account()
     off = CAP - s["baseline_account_equity"]
     return float(a.equity) + off, float(a.last_equity) + off
+
+
+def intraday_symbols():
+    """Symbols whose most recent entry today was tagged intraday (tag lives in Alpaca's client_order_id)."""
+    start = now_pt().replace(hour=0, minute=0, second=0, microsecond=0)
+    os_ = T.get_orders(GetOrdersRequest(status=QueryOrderStatus.ALL, after=start, limit=500))
+    return {o.symbol for o in os_ if (o.client_order_id or "").startswith("intra-")}
 
 
 def last_price(sym):
@@ -109,7 +116,7 @@ def cmd_status(a):
     if pos:
         print("Positions:")
         for p in pos:
-            tag = "intraday" if p.symbol in s["intraday"] else "swing"
+            tag = "intraday" if p.symbol in intraday_symbols() else "swing"
             print(f"  {p.symbol:6s} {p.side.value:5s} qty {p.qty:>6s} avg {float(p.avg_entry_price):9.2f} "
                   f"last {float(p.current_price):9.2f}  P&L {float(p.unrealized_pl):+8.2f} ({float(p.unrealized_plpc):+.2%}) [{tag}]")
     else:
@@ -251,15 +258,15 @@ def cmd_enter(a):
     print(json.dumps(plan, indent=1))
     if a.dry_run:
         print("(dry run — nothing sent)"); return
+    coid = f"{'intra' if a.horizon == 'intraday' else 'swing'}-{a.sym}-{now_pt():%Y%m%d%H%M%S}"
     req = MarketOrderRequest(symbol=a.sym, qty=qty, side=OrderSide.BUY if sgn > 0 else OrderSide.SELL,
+                             client_order_id=coid,
                              time_in_force=TimeInForce.DAY if a.horizon == "intraday" else TimeInForce.GTC,
                              order_class=OrderClass.BRACKET, take_profit=TakeProfitRequest(limit_price=round(a.target, 2)),
                              stop_loss=StopLossRequest(stop_price=round(a.stop, 2)))
     o = T.submit_order(req)
     plan["order_id"] = str(o.id)
     jlog({"type": "entry", **plan})
-    if a.horizon == "intraday":
-        s["intraday"] = sorted(set(s["intraday"]) | {a.sym}); save(s)
     print("SENT", o.id, o.status.value)
 
 
@@ -273,18 +280,14 @@ def cmd_close(a):
     T.close_position(a.sym)
     jlog({"type": "exit", "symbol": a.sym, "qty": p.qty, "exit_ref": float(p.current_price),
           "unrealized_pl": float(p.unrealized_pl), "reason": a.reason})
-    s["intraday"] = [x for x in s["intraday"] if x != a.sym]; save(s)
     print(f"Closed {a.sym}: P&L ~{float(p.unrealized_pl):+.2f}")
 
 
 def cmd_flatten(a):
-    s = state()
-    held = {p.symbol: p for p in T.get_all_positions()}
-    for sym in list(s["intraday"]):
-        if sym in held:
-            a.sym, a.reason = sym, "end-of-day flatten (intraday trade)"
-            cmd_close(a)
-    s = state(); s["intraday"] = []; save(s)
+    held = {p.symbol for p in T.get_all_positions()}
+    for sym in intraday_symbols() & held:
+        a.sym, a.reason = sym, "end-of-day flatten (intraday trade)"
+        cmd_close(a)
     print("Intraday positions flat.")
 
 
